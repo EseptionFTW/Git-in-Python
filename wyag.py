@@ -1,0 +1,4 @@
+import libwyag
+libwyag.main()
+
+
