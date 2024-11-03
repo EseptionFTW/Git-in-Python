@@ -8,6 +8,10 @@ from math import ceil
 #collections adds extra commands for our data types like strings and dicts
 
 
+#RENAME ALL VARIABLES AND METHODS TO BE MORE DESCRIPTIVE
+
+
+
 #used to parse(enter data) through gits, git COMMAND where command is any valid git command 
 argparser = argparse.ArgumentParser(description = "Python Git Clone - Default Parser")
 argsubparser = argparser.add_subparsers(title= "Commands", dest = "command")
@@ -22,16 +26,16 @@ def main(argv=sys.argv[1:]):
         case "hash-object"  : cmd_hash_object(args)
         case "log"          : cmd_log(args)
         case "commit"       : cmd_commit(args)
-        case "add"          : cmd_add(args)
-        case "check-ignore" : cmd_check_ignore(args)
-        case "checkout"     : cmd_checkout(args)
-        case "ls-files"     : cmd_ls_files(args)
         case "ls-tree"      : cmd_ls_tree(args)
-        case "rev-parse"    : cmd_rev_parse(args)
-        case "rm"           : cmd_rm(args)
+        case "checkout"     : cmd_checkout(args)
         case "show-ref"     : cmd_show_ref(args)
-        case "status"       : cmd_status(args)
         case "tag"          : cmd_tag(args)
+        case "rev-parse"    : cmd_rev_parse(args)
+        case "ls-files"     : cmd_ls_files(args)
+        case "check-ignore" : cmd_check_ignore(args)
+        case "status"       : cmd_status(args)
+        case "rm"           : cmd_rm(args)
+        case "add"          : cmd_add(args)
         case _              : print("Error: Command Input.")
 
 #the git repo(vault)
@@ -192,10 +196,9 @@ class GitObject (object):
     def init(self):
         pass
 
-#fmt = format
 def object_read(repo, sha):
 
-    path = repo_find(repo, "objects", sha[0:2], sha[2:1])
+    path = repo_file(repo, "objects", sha[0:2], sha[2:1])
 
     if not os.path.isfile(path):
         return None
@@ -205,7 +208,7 @@ def object_read(repo, sha):
 
         #reads object type
         x = raw.find(b' ')
-        fmt = raw[0:x]
+        format = raw[0:x]
 
         y = raw.find(b'\x00', x)
         size = int(raw[x:y].decode("ascii"))
@@ -213,13 +216,13 @@ def object_read(repo, sha):
             raise Exception("Malformed Object {0}: bad length".format(sha))
         
         #constructor
-        match fmt:
+        match format:
             case b'commit' : c=GitCommit
             case b'tree'  : c=GitTree
             case b'tag'   : c=GitTag
             case b'blob'  : c=GitBlob
             case _:
-                raise Exception("Unknown type {0} for object {1}".format(fmt.decode("ascii"), sha))
+                raise Exception("Unknown type {0} for object {1}".format(format.decode("ascii"), sha))
             
         #call constructor and return object
         return c(raw[y+1:])
@@ -229,7 +232,7 @@ def object_writer(obj, repo = None):
 
     data = obj.serialize()
 
-    result = obj.fmt + b' ' + str(len(data)).encode() + b'\x00' + data
+    result = obj.format + b' ' + str(len(data)).encode() + b'\x00' + data
 
     sha = hashlib.sha1(result).hexdigest()
 
@@ -246,7 +249,7 @@ def object_writer(obj, repo = None):
     return sha
 
 #finds object name
-def object_find(repo, name, fmt = None, follow = True):
+def object_find(repo, name, format = None, follow = True):
     return name
 #hi
 #hi
@@ -254,7 +257,7 @@ def object_find(repo, name, fmt = None, follow = True):
 #instance object git object match constructer super
 #blob = contents of a fuke
 class GitBlob(GitObject):
-    fmt = b'blob'
+    format = b'blob'
 
     def serialize(self):
         return self.blobdata
@@ -275,10 +278,10 @@ argsp.add_argument("object",
 #finds file and displays contents
 def cmd_cat_file(args):
     repo = repo_find()
-    cat_file(repo, args.object, fmt = args.type.encode())
+    cat_file(repo, args.object, format = args.type.encode())
 
-def cat_file(repo, obj, fmt = None):
-    obj = object_read(repo, object_find(repo, obj, fmt = fmt))
+def cat_file(repo, obj, format = None):
+    obj = object_read(repo, object_find(repo, obj, format = format))
     sys.stdout.buffer.write(obj.serialize())
 
 #SUBPARSER HASH-OBJECT (hash-object [-w what is written] [-t the type] file)
@@ -309,17 +312,17 @@ def cmd_hash_object(args):
         print(sha)
 
 #actually pases data 
-def object_hash(fd, fmt, repo = None):
+def object_hash(fd, format, repo = None):
 
     data = fd.read()
 
-    match fmt:
+    match format:
         case b'commit' : c=GitCommit(data)
         case b'tree'   : c=GitTree(data)
         case b'tag'    : c=GitTag(data)
         case b'blob'   : c=GitBlob(data)
         case _:
-            raise Exception("Unknow Type %s!" % fmt)
+            raise Exception("Unknow Type %s!" % format)
     
     return object_writer(obj, repo)
 
@@ -398,7 +401,7 @@ def kvlm_serialize(kvlm):
     return ret
 
 class GitCommit(GitObject):
-    fmt = b'commit'
+    format = b'commit'
 
     def deserialize(self, data):
         self.kvlm = kvlm_parse(data)
@@ -442,7 +445,7 @@ def log_graphviz(repo, sha, seen):
         message = message[:message.index("\n")]
     
     print("  c_{0} [label=\"{1}: {2}\"]".format(sha, sha[0:7], message))
-    assert commit.fmt == b'commit'
+    assert commit.format == b'commit'
 
     #base case for initial commit graph
     if b'parent' in commit.kvlm.keys():
@@ -459,3 +462,257 @@ def log_graphviz(repo, sha, seen):
         print(" c_{0} -> c_{1};".format(sha, p))
         log_graphviz(repo, p, seen)
 
+
+#all tree logic
+#goes through trees using recursive functions
+#extracts and reads from objcts and places them back in correct sorted order
+
+
+class GitTree(GitObject):
+    format = b'tree'
+
+    def init(self):
+        self.items = list()
+
+    def deserialize(self, data):
+        self.items = tree_parse_data_extractor(data)
+    
+    def serialize(self, repo):
+        return tree_serialize(self)
+
+class GitTreeLeaf(object):
+
+    def __init__(self, mode, path, sha):
+        self.mode = mode
+        self.path = path
+        self.sha = sha
+    
+def tree_parse_data_extractor(raw, start = 0):
+
+    modeSpaceTerminator = raw.find(b' ', start)
+    assert modeSpaceTerminator - start == 5 or modeSpaceTerminator - start == 6
+
+    mode = raw[start:modeSpaceTerminator]
+    if len(mode) == 5:
+        mode = b" " + mode
+    
+    pathNullTerminator = raw.find(b'\x00', modeSpaceTerminator)
+    path = raw[modeSpaceTerminator + 1:pathNullTerminator]
+
+    read_sha = int.from_bytes(raw[pathNullTerminator + 1: pathNullTerminator + 21], "big")
+
+    paddedSha = format(read_sha, "040x")
+
+    return pathNullTerminator+21, GitTreeLeaf(mode, path.decode("utf8"), paddedSha)
+
+
+def tree_parse(raw):
+
+    position = 0
+    max = len(raw)
+    returnVals = list()
+
+    while position < max:
+        position, data = tree_parse_data_extractor(raw, position)
+        returnVals.append(data)
+    
+    return returnVals
+
+def tree_leaf_sort_key_conversion(leaf):
+
+    if leaf.mode.startswith(b"10"):
+        return leaf.path
+    else:
+        return leaf.path + "/"
+
+def tree_serialize(object):
+
+    object.items.sort(key = tree_leaf_sort_key_conversion)
+    returnVal = b''
+    for leaf in object.items:
+        returnVal += leaf.mode
+        returnVal += b' '
+        returnVal += leaf.path.encode("utf8")
+        returnVal += b'\x00'
+        sha = int(leaf.sha, 16)
+        returnVal += sha.to_bytes(20, byteorder = "big")
+
+    return returnVal
+
+#subparser LS-TREE (ls-tree [-r recursive] TREE)
+
+argsp = argsubparser.add_parser("ls_tree", help = "Print A Tree Object.")
+argsp.add_argument("-r",
+                   dest= "recursive",
+                   action= "store_true",
+                   help= "Recurse Into Its Sub-Trees")
+argsp.add_argument("tree",
+                   help= "A Tree-Like Object")
+
+def cmd_ls_tree(args):
+    repo = repo_find()
+    ls_tree(repo, args.tree, args.recursive)
+
+def ls_tree(repo, reference, recursive = None, prefix = ""):
+    
+    sha = object_find(repo, reference, format = b"tree")
+    object = object_read(repo, sha)
+
+    for item in object.items:
+        if len(item.mode) == 5:
+            type = item.mode[0:1]
+        else:
+            type = item.mode[0:2]
+        
+        match type:
+            case b'04': type = "tree"
+            case b'10': type = "blob"
+            case b'12': type = "blob"
+            case b'16': type = "commit"
+            case _: raise Exception("Unknown Tree Leaf Mode {}".format(item.mode))
+
+    if not (recursive and type == "tree"):
+        print("{0} {1} {2}\t{3}".format(
+            "0" * (6 - len(item.mode)) + item.mode.decode("ascii").
+            type,
+            item.sha,
+            os.path.join(prefix, item.path)))
+    else:
+        ls_tree(repo, item.sha, recursive, os.path.join(prefix, item.path))
+
+#subparser CHECKOUT (checkout commit path), added path for simplicity and security
+argsp = argsubparser.add_parser("checkout", help= "Checkout A Commit Inside Of The Directory.")
+argsp.add_argument("commit",
+                   help= "The Commit Or Tree To Checkout")
+argsp.add_argument("path",
+                   help= "The Empty Directory To Checkout On.")
+
+def cmd_checkout(args):
+
+    repo = repo_find()
+    object = object_read(repo, object_find(repo, args.commit))
+
+    if object.format == b'commit':
+        object = object_read(repo, object.kvlm[b'tree'].decode("ascii"))
+    
+    if os.path.exists(args.path):
+        if not os.path.isdir(args.path):
+            raise Exception("Not A Directory {0}!".format(args.path))
+        if os.listdir(args.path):
+            raise Exception("Not Empty Directory {0}".format(args.path))
+    else:
+        os.makedirs(args.path)
+    
+    tree_checkout(repo, object, os.path.realpath(args.path))
+
+def tree_checkout(repo, tree, path):
+    for item in tree.path:
+        object = object_read(repo, item.sha)
+        dest = os.path.join(path, item.path)
+
+        if object.format == b'tree':
+            os.mkdir(dest)
+            tree_checkout(repo, object, dest)
+        elif object.format == b'blob':
+            with open(dest, 'wb') as writer:
+                writer.write(object.blobdata)
+
+#refrences
+
+#subparser SHOW-REF (show-ref )
+argsp = argsubparser.add_parser("show-ref", help= "Lists Object Refernces.")
+
+def cmd_show_ref(args):
+    repo = repo_find()
+    refrences = refrence_list(repo)
+    show_refrences(repo, refrences, prefix= "refs")
+
+def show_refrences(repo, refrences, with_hash= True, prefix= ""):
+
+    for key, value in refrences.items:
+        if type(value) == str:
+            print("{0}{1}{2}".format(
+                value + " " if with_hash else "",
+                prefix + "/" if prefix else "",
+                key))
+        else:
+            show_refrences(repo, value, with_hash= with_hash, prefix= "{0}{1}{2}".format(prefix, "/" if prefix else "", key))
+
+
+def refrence_resolver(repo, refrence):
+    
+    path = repo_file(repo, refrence)
+
+    if not os.path.isfile(path):
+        return None
+    
+    with open(path, 'r') as reader:
+        data = reader.read()[:-1]
+    
+    if data.startswith("ref: "):
+        return refrence_resolver(repo, data[5:])
+    else:
+        return data
+
+def refrence_list(repo, path= None):
+    if not path:
+        path = repo_dir(repo, "refs")
+    
+    returnVals = collections.OrderedDict()
+
+    for item in sorted(os.listdir(path)):
+        pathBin = os.path.join(path, item)
+        if os.path.isdir(pathBin):
+            returnVals[item] = refrence_list(repo, pathBin)
+        else:
+            returnVals[item] = refrence_resolver(repo, pathBin)
+
+#user defined ref values
+class GitTag(GitCommit):
+    format = b'tag'
+
+#subparser TAG (tag [-a create new] name object)
+argsp = argsubparser.add_parser("tag", help= "List And Create New Tags.")
+argsp.add_argument("-a",
+                   action= "store_true",
+                   dest= "create_tag_object",
+                   help= "Optional Create A Tag Object.")
+argsp.add_argument("name",
+                   nargs= "?",
+                   help= "The Tags Name.")
+argsp.add_argument("object",
+                   default= "HEAD",
+                   nargs= "?",
+                   help= "The Object The Tag Will Point Towards.")
+
+def cmd_tag(args):
+    repo = repo_find()
+
+    if args.name:
+        tag_create(repo, args.name, args.object, type= "object" if args.create_tag_object else "ref")
+    else:
+        refrences = refrence_list(repo)
+        show_refrences(repo, refrences["tags"], with_hash= False)
+
+def tag_create(repo, name, refernce, create_tag_object= False):
+    sha = object_find(repo, refernce)
+
+    if create_tag_object:
+        tag = GitTag(repo)
+        tag.kvlm = collections.OrderedDict()
+        tag.kvlm[b'object'] = sha.encode()
+        tag.kvlm[b'type'] = b'commit'
+        tag.kvlm[b'tag'] = name.encode()
+        tag.kvlm[b'tagger'] = b'Wyag <test>' #fix
+        tag.kvlm[None] = b"A Tag Generated By Eseption's Wyag, Message Hardcoded."
+        tag_sha = object_writer(tag)
+        reference_create(repo, "tags/" + name, tag_sha)
+    else:
+        reference_create(repo, "tags/" + name, sha)
+
+def reference_create(repo, reference_name, sha):
+    with open(repo_file(repo, "refs/" + reference_name), 'w') as writer:
+        writer.write(sha + "\n")
+
+
+#fixed error in object_read, added tree and checkout, refs and tags
